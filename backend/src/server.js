@@ -3,6 +3,7 @@ dotenv.config();
 
 import { connectDB } from "./config/db.js";
 import app from "./app.js";
+import { ensureAdmin } from "./controllers/auth.controller.js";
 
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI;
@@ -12,12 +13,17 @@ if (!MONGO_URI) {
   process.exit(1);
 }
 
-(async () => {
+const startServer = async () => {
   try {
     await connectDB(MONGO_URI);
-    app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+    await ensureAdmin(); // seed HR admin if not exists
+    app.listen(PORT, () => {
+      console.log(`✅ Server running on http://localhost:${PORT}`);
+    });
   } catch (err) {
     console.error("❌ Failed to start server:", err);
     process.exit(1);
   }
-})();
+};
+
+startServer();

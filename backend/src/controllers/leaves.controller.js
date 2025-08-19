@@ -150,3 +150,101 @@ export const rejectLeave = async (req, res, next) => {
     res.json({ id: request._id, status: request.status });
   } catch (err) { next(err); }
 };
+
+
+
+export const listLeaves = async (req, res, next) => {
+  try {
+    let { employeeId, department, status, from, to, page = 1, limit = 20 } = req.query;
+
+    // Ensure safe integers
+    page = Math.max(parseInt(page), 1);
+    limit = Math.min(Math.max(parseInt(limit), 1), 100); // max 100 per page
+    const skip = (page - 1) * limit;
+
+    const query = {};
+
+    // RBAC: Employees see only their own leaves
+    if (req.user.role === "Employee") {
+      employeeId = req.user.employeeId;
+    }
+
+    if (employeeId) query.employeeId = employeeId;
+    if (status) query.status = status;
+
+    // Date filtering
+    if (from || to) {
+      query.startDate = {};
+      if (from) {
+        const fromDate = new Date(from);
+        if (isNaN(fromDate)) return res.status(400).json({ message: "Invalid from date" });
+        query.startDate.$gte = fromDate;
+      }
+      if (to) {
+        const toDate = new Date(to);
+        if (isNaN(toDate)) return res.status(400).json({ message: "Invalid to date" });
+        query.startDate.$lte = toDate;
+      }
+    }
+
+    let leaves = [], total = 0;
+
+    if (department) {
+      // Aggregate for department filtering
+      const pipeline = [
+        { $lookup: { from: "employees", localField: "employeeId", foreignField: "_id", as: "emp" } },
+        { $unwind: "$emp" },
+        { $match: { "emp.department": department, ...query } },
+        { $sort: { createdAt: -1 } },
+        { $skip: skip },
+        { $limit: limit }
+      ];
+      leaves = await LeaveRequest.aggregate(pipeline);
+
+      const countPipeline = [
+        { $lookup: { from: "employees", localField: "employeeId", foreignField: "_id", as: "emp" } },
+        { $unwind: "$emp" },
+        { $match: { "emp.department": department, ...query } },
+        { $count: "count" }
+      ];
+      total = (await LeaveRequest.aggregate(countPipeline))[0]?.count || 0;
+
+    } else {
+      // Normal query
+      total = await LeaveRequest.countDocuments(query);
+      leaves = await LeaveRequest.find(query)
+        .populate(req.user.role === "HR" ? "employeeId" : "") // populate employee only for HR
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
+    }
+
+    // Map results
+    const results = leaves.map(l => ({
+      id: l._id,
+      employee: l.employeeId ? {
+        id: l.employeeId._id,
+        name: l.employeeId.name,
+        email: l.employeeId.email,
+        department: l.employeeId.department
+      } : null,
+      startDate: l.startDate,
+      endDate: l.endDate,
+      daysRequested: l.daysRequested,
+      status: l.status,
+      reason: l.reason,
+      decidedBy: l.decidedBy,
+      decidedAt: l.decidedAt,
+      decisionNote: l.decisionNote
+    }));
+
+    res.json({
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+      results
+    });
+  } catch (err) {
+    next(err);
+  }
+};

@@ -5,12 +5,18 @@ import {
   listEmployees,
   getLeaveBalanceForEmployee
 } from "../controllers/employees.controller.js";
+import { requireAuth, requireHR } from "../middleware/auth.js";
 
 const router = Router();
 
-router.post("/", createEmployee);
-router.get("/", listEmployees);
-router.get("/:id", getEmployee);
-router.get("/:id/leave-balance", getLeaveBalanceForEmployee);
+// HR-only routes
+router.post("/", requireAuth, requireHR, createEmployee);
+
+// List employees: HR can see all with filters & pagination, Employee sees self only
+router.get("/", requireAuth, listEmployees);
+
+// HR or self routes
+router.get("/:id", requireAuth, getEmployee); // Get employee details
+router.get("/:id/balance", requireAuth, getLeaveBalanceForEmployee); // Get leave balance
 
 export default router;
